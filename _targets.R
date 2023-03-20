@@ -8,11 +8,11 @@
 ########################################
 # Load packages required to define the pipeline:
 
-
 library(targets)
 library(tarchetypes)
 
 #### Parameters
+coins = 250 #Number of coins to include in summary groups
 ## Set import criteria to avoid number trimming
 options(scipen = 999, digits = 12, max.print=10000, tidyverse.quiet = TRUE)
 
@@ -20,12 +20,11 @@ options(scipen = 999, digits = 12, max.print=10000, tidyverse.quiet = TRUE)
 pacman::p_load(tidyverse, cansim, smooth, mFilter, forcats, stringr, janitor, readxl, xts, data.table,
                tibbletime, zoo, lubridate, Rblpapi, gridExtra, seasonal, rvest, httr, curl, tinytest, 
                readxl, httr, purrr, rio, timeDate, bit, dplyr, PerformanceAnalytics, DescTools, crypto2) 
-options(scipen = 999, digits = 12, max.print=10000, tidyverse.quiet = TRUE)
 
 
 # Set target options:
 tar_option_set(packages = c("janitor", "PerformanceAnalytics", "scales", "data.table", 
-                            "readxl", "cansim",
+                            "readxl", "cansim", 'zoo', 'cryptowatchR',
                             "lubridate", "tidyverse", "DescTools",
                             "withr", "fstcore", "targets", "testthat", 
                             'PerformanceAnalytics', 'DescTools', 'rvest', 'crypto2'),
@@ -46,6 +45,7 @@ source("R/functions.R")
 outfile_name <- "rsr_srwl.ts.csv"
 outfile_path <-  paste0("T://SRWG//RSR//SRWL_Targets//",outfile_name) %>% as.character()
 
+outfile_path_crypto <- paste0("T://SRWG//RSR//SRWL_Targets//","rsr3_srwl.ts.csv") %>% as.character()
 
 ## TARGET LIST  ----------------------------
 
@@ -107,9 +107,36 @@ list(
   tar_target(bis_data, Credit_to_gdp_bis('dummy')),
   tar_target(df_exempt_mortgage, exempt_mortgage(mie.sheet)),
   tar_target(db.eikon, EIKON_DATA(eikon_bonds_issuance, eikon_bonds_panel)),
-  #tar_target(db.crypto, crypto_function()),
   
-  
+  tar_target(crypto.list, list_func(TRUE)), 
+    
+  #Update spot data by putting in new date in YYYYmmdd format
+  tar_target(crypto.data, crypto_data(crypto.list, coins)), 
+    
+  ## Categorize as stablecoin or unpegged coin
+  tar_target(c.stable, stable_or_not(crypto.data)),
+    
+  tar_target(c.cap, market_cap_factor(c.stable)),
+    
+    
+  ### Conduct year-over-year percentage change
+  tar_target(c.turn, turnover_func(data.frame(c.cap))),
+    
+  ## Estimate Bidask
+  tar_target(c.bidask, corwin_schultz(c.turn)),
+    
+  ## Amihud liquidity
+  tar_target(amihud.ratio, amihud(c.bidask)),
+    
+  ## conventional liquidity
+  tar_target(c.ratio, conventional(amihud.ratio)),
+    
+  ## Standard Deviation (Volatility)
+  tar_target(c.standard, standard_dev(c.ratio)),
+    
+  #DF containing important crypto data 
+  tar_target(quar.data, srwl_output(c.standard, crypto.list, coins)),
+    
   # Create df with indicators 
   tar_target(
     statcan_merged,
@@ -117,6 +144,8 @@ list(
       PMIC_SIZE_file = PMIC_SIZE_file,
       nfc_dsr_file = nfc_dsr_file
     )),
+  
+  
   # Combine all dfs under one df
   tar_target(df_long, output_final_df_long(db.boc = db.boc, 
                                            IIROC_DF_MTRS = IIROC_DF_MTRS, 
@@ -128,12 +157,17 @@ list(
                                            data_hh_cansim = data_hh_cansim, 
                                            bis_data =  bis_data, 
                                            df_exempt_mortgage = df_exempt_mortgage, 
-                                           db.eikon = db.eikon)), 
+                                           db.eikon = db.eikon,
+                                           quar.data = quar.data)), 
   
   
-  # Write output
+  # Write output rsr 
   tar_target(output,
-             output_func(df_long, outfile_path), format = 'file')
+             output_func_rsr(df_long, outfile_path), format = 'file'),
+  
+  #Write output crypto data
+  tar_target(output_crypto,
+             output_func_rsr3(quar.data, outfile_path_crypto), format = 'file')
+  
   
 )
-

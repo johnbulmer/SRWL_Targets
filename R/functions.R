@@ -13,9 +13,19 @@
 
 pacman::p_load(tidyverse, cansim, smooth, mFilter, forcats, stringr, janitor, readxl, xts, data.table,
                tibbletime, zoo, lubridate, Rblpapi, gridExtra, seasonal, rvest, httr, curl, tinytest, 
-               readxl, httr, purrr, rio, timeDate, bit, dplyr, PerformanceAnalytics, DescTools) 
+               readxl, httr, purrr, rio, timeDate, bit, dplyr, PerformanceAnalytics, DescTools,
+               crypto2, coinmarketcapr, cryptowatchR) 
+
 
 start.date.cansim <- "2000-01-01"
+
+### Individual coins to plot
+
+###################
+
+stable.list <- c("BUSD", "DAI", "USDC", "USDT", "UST", "TUSD", "USDP", "USDN", "USDD", "FEI", "GUSD", "RSR",
+                 "FRAX", "LUSD", "HUSD", "USDX", "SUSD", "USTC")
+
 
 ## FUNCTIONS ----------------------------
 
@@ -654,113 +664,231 @@ EIKON_DATA <- function(eikon_bonds_issuance, eikon_bonds_panel) {
 #################################################################################
 
 
-# output_final_df_long <- function(boc_prices_url,PMIC_SIZE_file,nfc_dsr_file,url_iiroc_marketplace,
-#                      crea_housing_file,eikon_bonds_issuance,eikon_bonds_panel,
-#                      start.date.cansim,tsx_mig_file,iiroc_mrts_file,mie.sheet) {
-#   df <- purrr::reduce(list(BOC_DATA(boc_prices_url),
-#                            COMPUTE_INDICATORS(PMIC_SIZE_file,nfc_dsr_file),
-#                            IIROC_df_MarketplaceStats(url_iiroc_marketplace),
-#                            CREA_HOUSING(crea_housing_file), hh_cansim(start.date.cansim), 
-#                            EIKON_DATA(eikon_bonds_issuance, eikon_bonds_panel),  
-#                            Credit_to_gdp_bis(g), TSX_MiG(tsx_mig_file),
-#                            IIROC_DF_MRTS(iiroc_mrts_file), 
-#                            cansim_flow(start.date.cansim), exempt_mortgage(mie.sheet))
-#                       ,dplyr::left_join, by = 'date') 
-#   
-#   df_long <- df  %>% 
-#     filter(as.Date(date) >= as.Date('2000-01-01')) %>% 
-#     select(c("date",sort(names(df[,-1])))) %>%
-#     pivot_longer(cols=c(2:47), names_to='variable', values_to='value') %>% 
-#     group_by(date) %>%
-#     mutate('file.name' = 'rsr_srwl.ts.csv') %>%
-#     rename(calendar.quarter = date) %>%
-#     select(file.name, calendar.quarter, variable, value)
-#   
-#   #write_csv(df_long,'C:\\Users\\MjaenCortes\\Desktop\\R Projects\\John Project\\rsr_srwl.ts.csv')
-#   #write_delim(df,paste0(output.files,"archive/rsr_srwl.ts", Sys.Date(),".csv"),delim = ",")    
-#   message("**********Databases joined and saved (db.all, db.all_wide)****************")
-#   
-#   return(df_long)
-# }
+#Returns list of coins which are active
+list_func <- function(active.only){
+  
+  df <- crypto_list(only_active = active.only) %>% # TRUE
+    arrange(rank)
+  return(df)
+}
 
-# crypto_function <- function(){
-#   ### Pull crypto market cap
-#   list_coins <- crypto_list(only_active = ) %>%
-#     arrange(rank)
-#   
-#   #Capture top 150 coin histories
-#   list_coins1 <- list_coins[1:75,]
-#   list_coins2 <- list_coins[76:150,]
-#   #list_coins3 <- list_coins[151:200,]
-#   
-#   #Pull data in two pulls (with a 5 sec break in between)
-#   crypto.data1 <- crypto_history(list_coins1, start_date = "20170101")
-#   message("********** Please wait for 5 seconds ****************")
-#   Sys.sleep(5)
-#   crypto.data2 <- crypto_history(list_coins2, start_date = "20170101")
-#   #crypto.data3 <- crypto_history(list_coins3, start_date = "20170101")
-#   message("********** Data scraping COMPLETE ****************")
-#   Sys.sleep(5)
-#   gc()
-#   
-#   #Combine and rank by market cap
-#   crypto.data <- rbind(crypto.data1,crypto.data2) %>% 
-#     arrange("market cap") %>%
-#     mutate(time_open = floor_date(time_open,"days")) %>%
-#     select(c("date" = "time_open","symbol","market_cap","volume","high","low")) %>% 
-#     mutate(date = as.POSIXct(date),
-#            date = as.Date(date))
-#   
-#   stable.data <- crypto.data %>% 
-#     filter(high <1.01,
-#            low > 0.99)
-#   
-#   list <- crypto.data %>% group_by(symbol) %>% summarize(close = mean(close, na.rm = T)) %>% filter(close > 0.95 & close < 1.05)
-#   
-#   crypto.all <- crypto.data %>% 
-#     group_by(date) %>% 
-#     summarize(market_cap = sum(market_cap), volume = sum(volume)) %>% 
-#     ungroup() %>% 
-#     mutate(date = floor_date(date,"quarter") - days(1)) %>%
-#     group_by(date) %>% 
-#     summarize_all(last) %>% 
-#     ungroup() %>%
-#     rename(crypto_market_cap = market_cap, crypto_volume = volume) %>% 
-#     gather("metric",VALUE,2:3)
-#   
-#   
-#   stable.all <- stable.data %>% 
-#     group_by(date) %>% 
-#     summarize(market_cap = sum(market_cap), volume = sum(volume)) %>% 
-#     ungroup() %>% 
-#     mutate(date = floor_date(date,"quarter") - days(1)) %>%
-#     group_by(date) %>% 
-#     summarize_all(last) %>% 
-#     ungroup() %>% 
-#     rename(stablecoin_market_cap = market_cap, stablecoin_volume = volume) %>%
-#     gather("metric",VALUE,2:3)
-#   
-#   #Combine for SRWG and RC Dashboard
-#   db.crypto <- rbind(crypto.all, stable.all)
-#   
-#   return(db.crypto)
-# }
+
+
+#### Pull Data from CoinMktCap
+crypto_data <- function(list_coins, length){
+  ## Pull data
+  
+  for (n in seq(from = 1, to = length, by = 1)){
+    list <- list_coins %>% slice(n) 
+    print(list)
+    dg <- crypto_history(list, start_date = "20170101", end_date = str_replace_all(Sys.Date(),"-",""))
+    print("********** Please wait for 5 seconds ****************")
+    # Sys.sleep(0.1)
+    if(n == 1){
+      dh <- dg
+    } else if(n > 1){
+      dh <- bind_rows(dh, dg)
+    }
+  }
+  
+  dh <- dh %>% mutate(date = as.Date(time_open))
+  
+  return(dh)
+}
+
+
+#Classifies coin as stable or non stable
+stable_or_not <- function(df){
+  
+  
+  list <- df %>% filter(date <= "2022-03-29") %>% group_by(symbol) %>% 
+    summarize(close = mean(close, na.rm = T)) %>% filter(close > 0.95 & close < 1.05 & !(symbol %in% c('ARRR','KLAY'))) #ARRR and KLAY are picked up by the filter but are unpegged
+  
+  
+  df <- df %>% mutate(stable.unpegged = if_else(symbol %in% list$symbol, "stablecoin", "unpegged"))
+  df <- df %>% mutate(btc.eth.stable.other = case_when(symbol %in% list$symbol ~ "4stablecoin",
+                                                       symbol == "BTC" ~ "1bitcoin",
+                                                       symbol == "ETH" ~ "2ethereum",
+                                                       TRUE ~ "3crypto_unpegged")) 
+  
+  return(df)
+}
+
+
+
+
+#Classifies the market cap into different bins for plotting (higher than 10b, 1-10b, and 0.1b)
+market_cap_factor <- function(df){
+  df <- df %>% group_by(date, symbol) %>% mutate(factorcap = case_when(   market_cap >= 10e9 ~ "1_10_Billion",
+                                                                          market_cap >= 1e9 & market_cap < 10e9 ~ "2_1_Billion", 
+                                                                          TRUE ~ "3_100_million"))
+  return(df)
+}
+
+
+
+#Calculate Turnover
+turnover_func <- function(df){
+  
+  df <- df  %>% group_by(date, symbol) %>% mutate(turnover = (volume/market_cap)*100)
+  is.na(df) <- sapply(df, is.infinite)
+  is.na(df) <- sapply(df, is.nan)
+  
+  return(df)
+}
+
+#Bid-ask spread estimator
+corwin_schultz <- function(df){
+  high <- pull(df, var = "high")
+  low <-  pull(df, var = "low")
+  open <-  pull(df, var = "open") 
+  close <-  pull(df, var = "close")
+  
+  
+  ###high/low corrections
+  #If the close on day 1 is greater than the high on day 2
+  for(t in seq(from = 1, to = length(high) - 1)){
+    if(close[t] > high[t+1]){
+      high[t+1] <- high[t+1] + close[t] - open[t+1]
+      low[t+1]  <- low[t+1] + close[t] - open[t+1]
+      
+    }}
+  
+  #If close on day 1 is less than low on day 2
+  for(t in seq(from = 1, to = length(high) - 1)){
+    if(close[t] < low[t+1]){
+      high[t+1] <- high[t+1] - (close[t] - open[t+1])
+      low[t+1]  <- low[t+1] - (close[t] - open[t+1])
+      
+    }}
+  
+  
+  #Find two day high
+  two.day.high <- c()
+  for(t in seq(from = 1, to = length(high) )){
+    two.day.high <- append(two.day.high, max(high[t: t+1]))
+  }  
+  
+  
+  #Find two day low
+  two.day.low <- c()
+  for(t in seq(from = 1, to = length(low) )){
+    two.day.low <- append(two.day.low, max(low[t: t+1]))
+  }  
+  
+  
+  #Variables
+  gamma <- log(two.day.high/two.day.low)^2
+  beta <- (log(high/low))^2 + (log(shift(high, fill = high[length(high)], type = "lead")/shift(low, fill = high[length(high)], type = "lead")))^2
+  alpha <- (sqrt(2*beta)-sqrt(beta))/(3-2*sqrt(2)) - sqrt(gamma/(3-2*sqrt(2)))
+  bid.ask <- 2*(exp(alpha) - 1)/(1 + exp(alpha))
+  
+  
+  df <- cbind(df, spread = bid.ask)
+  
+  return(df)
+  
+}
+
+#Computes the 30 day rolling average used in other functions, not used in a target
+rollav <- function(metric){                                   
+  metric <- rollapply(metric, 30, mean, fill = NA, align = "right")
+  return(metric)
+} 
+
+##amihud illiquidity ratio
+amihud <- function(df){  
+  
+  df <- df %>% group_by(symbol) %>% mutate(amihud = rollav(abs( (100*(open - close)/open )/volume)))
+  
+  return(df)
+  
+}
+
+
+##Conventional liquidity ratio
+conventional <- function(df){   
+  
+  df <- df %>% group_by(symbol) %>% mutate(con.ratio = rollav(volume) / rollav(abs(100*(open - close)/open)))
+  
+  return(df)
+}
+
+
+#Volatility
+standard_dev <- function(df){
+  
+  
+  df <- df %>% group_by(symbol) %>% mutate(sd.data = 100*rollapply(close, 30, sd, fill = NA, align = "right")/(rollav(close)))
+  
+  return(df) 
+}
+
+#merge and output data table for crypto data
+srwl_output <- function(c.standard, crypto.list, coins){
+  
+  quar.data_mkt_cap <- c.standard %>%  
+    filter(symbol %in% crypto.list$symbol[1:coins]) %>%
+    ungroup() %>% 
+    select(market_cap,  date, symbol, btc.eth.stable.other) %>%
+    group_by(btc.eth.stable.other, date) %>% 
+    summarize(market_cap = sum(market_cap, na.rm = T), .groups = 'keep') %>% 
+    mutate(market_cap) %>% 
+    group_by(quardate =  format(as.Date(date, format = "%Y-%m-%d"), "%Y-%m"), btc.eth.stable.other) %>% 
+    filter(date == last(date)) %>%
+    mutate(market_cap) %>% arrange(date) 
+  
+  
+  quar.data <- c.standard %>%  
+    filter(symbol %in% crypto.list$symbol[1:coins]) %>%
+    ungroup() %>% 
+    select(market_cap, spread, date, btc.eth.stable.other, symbol, volume) %>%
+    group_by(btc.eth.stable.other, date) %>% 
+    summarize(volume= sum(volume, na.rm = T), market_cap = sum(market_cap, na.rm = T), spread = mean(spread, na.rm = T), .groups = 'keep') %>% 
+    mutate(market_cap, spread, turnover = 100*volume/market_cap) %>%
+    group_by(quardate =  format(as.Date(date, format = "%Y-%m-%d"), "%Y-%m"), btc.eth.stable.other) %>% 
+    summarize(turnover = mean(turnover, na.rm = TRUE), spread = mean(spread)) %>%
+    mutate(turnover, spread) %>% cbind(market_cap = quar.data_mkt_cap$market_cap, date = quar.data_mkt_cap$date) %>% relocate(date) %>% 
+    rename(cs_ba_spread = spread) %>%
+    pivot_longer(cols = c("turnover", "market_cap", "cs_ba_spread"), values_to = "value", names_to = "variable") %>% ungroup(quardate) %>%
+    select(-quardate)
+  
+  
+  quar.data <- quar.data %>% mutate(variable = paste0("crypto_", btc.eth.stable.other, "_",variable))
+  
+  
+  
+  quar.data <-  quar.data %>% 
+    select(-btc.eth.stable.other) %>% 
+    mutate(file.name = rep("rsr3_srwl.ts.csv")) %>% 
+    relocate(file.name) %>%
+    arrange(date) %>%
+    filter(date != max(date))
+  
+  return(quar.data)
+}
+
 
 output_final_df_long <- function(db.boc, IIROC_DF_MTRS, df_TSX_MiG, 
                                  housing_data_df, IIROC_Equity_df, statcan_merged,
                                  data, data_hh_cansim, bis_data, 
-                                 df_exempt_mortgage, db.eikon) {
+                                 df_exempt_mortgage, db.eikon, quar.data) {
+  df.crypto <- quar.data %>%
+    mutate(date = ceiling_date(date, "quarters")-1) %>% 
+    group_by(date, variable) %>% 
+    summarize(value = last(value)) %>% 
+    pivot_wider(names_from = variable, values_from = value)
   
   df <- purrr::reduce(list(db.boc, IIROC_DF_MTRS, df_TSX_MiG, 
                            housing_data_df, IIROC_Equity_df, statcan_merged,
                            data, data_hh_cansim, bis_data, 
-                           df_exempt_mortgage, db.eikon)
+                           df_exempt_mortgage, db.eikon, df.crypto)
                       ,dplyr::left_join, by = 'date') 
-  
-  df_long <- df  %>% 
-    filter(as.Date(date) >= as.Date('2000-01-01')) %>% #be careful as current format is -days(1)
+  df <- df %>% mutate(date = date + days(1))
+  df_long <- df  %>%
+    filter(as.Date(date) >= as.Date('2000-01-01')) %>% #the current day format is calendar.quater -days(1)
     select(c("date",sort(names(df[,-1])))) %>%
-    pivot_longer(cols=c(2:47), names_to='variable', values_to='value') %>%  #cols=c(2:51) w crypto data
+    pivot_longer(cols=c(2:59), names_to='variable', values_to='value') %>%  
     group_by(date) %>%
     mutate('file.name' = 'rsr_srwl.ts.csv') %>%
     rename(calendar.quarter = date) %>%
@@ -770,13 +898,17 @@ output_final_df_long <- function(db.boc, IIROC_DF_MTRS, df_TSX_MiG,
   
   #write_csv(df_long,'C:\\Users\\MjaenCortes\\Desktop\\R Projects\\John Project\\rsr_srwl.ts.csv')
   #write_delim(df,paste0(output.files,"archive/rsr_srwl.ts", Sys.Date(),".csv"),delim = ",")    
-  message("**********Databases joined and saved (db.all, db.all_wide)****************")
+  message("**********Databases joined and saved****************")
   
   return(df_long)
 }
 
-output_func <- function(data, output_path){
-  write_csv(data, output_path)
-  output_path ## you must return an output path so that the file can be tracked. 
+output_func_rsr <- function(data_rsr, output_path){
+  write.csv(data_rsr, output_path)
+  message("**********file successfully updated and outputed****************")
 }
 
+output_func_rsr3 <- function(data, output_path){
+  write_csv(data, output_path)
+  message("**********crypto file successfully updated and outputed****************")
+}
